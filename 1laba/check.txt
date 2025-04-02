@@ -1,0 +1,7 @@
+----------------------------
+Bank: Belarusbank
+ATM Number: 1
+Account Number: BY44 AKBB 1234 5678 9012 3456 7890
+Operation: Add Money
+Amount: 10.00 BYN
+----------------------------
