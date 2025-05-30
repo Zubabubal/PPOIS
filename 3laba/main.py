@@ -1,22 +1,22 @@
 import pygame
 import random
 import asyncio
-import platform
-import json
 import os
+import json
 
 # Инициализация Pygame
 pygame.init()
+pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=2048)  # Моно
 
 # Настройки окна
 WIDTH, HEIGHT = 300, 600
 GRID_SIZE = 30
 GRID_WIDTH = WIDTH // GRID_SIZE
 GRID_HEIGHT = HEIGHT // GRID_SIZE
-PREVIEW_SIZE = 15  # ### Увеличено для предпросмотра: с 12 до 15
+PREVIEW_SIZE = 15
 PREVIEW_X = WIDTH + 20
-PREVIEW_Y = 150  # ### Увеличено для предпросмотра: смещено вниз
-PREVIEW_WIDTH = 2 * PREVIEW_SIZE  # ### Увеличено для предпросмотра: 30 пикселей
+PREVIEW_Y = 150
+PREVIEW_WIDTH = 2 * PREVIEW_SIZE
 PREVIEW_HEIGHT = 2 * PREVIEW_SIZE
 
 # Цвета
@@ -53,66 +53,24 @@ DIFFICULTY_LEVELS = {
     "Сложный": 10
 }
 
-# Хранилище рекордов
-HIGH_SCORES = {difficulty: 0 for difficulty in DIFFICULTY_LEVELS}
-
-# Функции для работы с рекордами
-def export_high_scores():
+# Загрузка рекордов из файла
+def load_high_scores():
     try:
-        return json.dumps(HIGH_SCORES)
-    except Exception as e:
-        print(f"Ошибка при экспорте рекордов: {e}")
-        return "{}"
+        with open("high_scores.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {difficulty: 0 for difficulty in DIFFICULTY_LEVELS}
 
-def import_high_scores(json_str):
-    global HIGH_SCORES
+# Сохранение рекордов в файл
+def save_high_scores(high_scores):
     try:
-        loaded_scores = json.loads(json_str)
-        expected_keys = set(DIFFICULTY_LEVELS.keys())
-        if not isinstance(loaded_scores, dict) or not expected_keys.issubset(loaded_scores.keys()):
-            print(f"Ошибка: HIGH_SCORES_JSON не содержит ожидаемые ключи {expected_keys}")
-            return
-        for key, value in loaded_scores.items():
-            if key in HIGH_SCORES and isinstance(value, (int, float)):
-                HIGH_SCORES[key] = int(value)
-        print("Рекорды загружены из HIGH_SCORES_JSON:", HIGH_SCORES)
-    except json.JSONDecodeError:
-        print("Ошибка: Неверный формат HIGH_SCORES_JSON, используются рекорды по умолчанию")
+        with open("high_scores.json", "w") as f:
+            json.dump(high_scores, f)
     except Exception as e:
-        print(f"Ошибка при загрузке HIGH_SCORES_JSON: {e}")
+        print(f"Ошибка сохранения рекордов: {e}")
 
-def save_high_scores_to_file():
-    if platform.system() != "Emscripten":
-        try:
-            with open("high_scores.json", "w", encoding="utf-8") as f:
-                json.dump(HIGH_SCORES, f)
-            print("Рекорды сохранены в high_scores.json")
-        except Exception as e:
-            print(f"Ошибка при сохранении рекордов в файл: {e}")
-    else:
-        json_str = export_high_scores()
-        print("Для сохранения рекордов в Pyodide скопируйте эту строку и вставьте в HIGH_SCORES_JSON в коде:")
-        print(json_str)
-
-def load_high_scores_from_file():
-    if platform.system() != "Emscripten" and os.path.exists("high_scores.json"):
-        try:
-            with open("high_scores.json", "r", encoding="utf-8") as f:
-                global HIGH_SCORES
-                loaded_scores = json.load(f)
-                for key, value in loaded_scores.items():
-                    if key in HIGH_SCORES and isinstance(value, (int, float)):
-                        HIGH_SCORES[key] = int(value)
-            print("Рекорды загружены из high_scores.json:", HIGH_SCORES)
-        except Exception as e:
-            print(f"Ошибка при загрузке рекордов из файла: {e}")
-
-# Загрузка рекордов при старте
-HIGH_SCORES_JSON = '{"Лёгкий": 200, "Средний": 400, "Сложный": 600}'
-if platform.system() == "Emscripten":
-    import_high_scores(HIGH_SCORES_JSON)
-else:
-    load_high_scores_from_file()
+# Инициализация рекордов
+HIGH_SCORES = load_high_scores()
 
 class Tetromino:
     def __init__(self):
@@ -147,7 +105,7 @@ class GameState:
                 if cell:
                     new_x = self.current_tetromino.x + x + dx
                     new_y = self.current_tetromino.y + y + dy
-                    if new_x < 0 or new_x >= GRID_WIDTH or new_y >= GRID_HEIGHT:
+                    if new_x < 0 or new_x >= GRID_WIDTH or new_y < 0 or new_y >= GRID_HEIGHT:
                         return True
                     if self.grid[new_y][new_x] != BLACK:
                         return True
@@ -168,7 +126,7 @@ class GameState:
 
     def update(self):
         if self.paused or self.game_over:
-            return
+            return 0
         self.fall_time += 1
         if self.fall_time >= self.fall_speed:
             self.fall_time = 0
@@ -176,13 +134,16 @@ class GameState:
                 self.current_tetromino.move(0, 1)
             else:
                 self.merge()
-                self.clear_lines()
+                cleared_lines = self.clear_lines()
                 self.current_tetromino = self.next_tetromino
                 self.next_tetromino = Tetromino()
                 if self.check_collision():
                     self.game_over = True
                     global HIGH_SCORES
                     HIGH_SCORES[self.difficulty] = max(HIGH_SCORES[self.difficulty], self.score)
+                    save_high_scores(HIGH_SCORES)
+                return cleared_lines
+        return 0
 
 class Menu:
     def __init__(self):
@@ -244,6 +205,68 @@ class Menu:
                     self.mode = "main"
         return None
 
+class SoundManager:
+    def __init__(self):
+        pygame.mixer.set_num_channels(16)
+        self.sounds = {}
+        sound_path = "sounds"
+        try:
+            self.sounds = {
+                'rotate': pygame.mixer.Sound(os.path.join(sound_path, 'rotate.wav')),
+                'move': pygame.mixer.Sound(os.path.join(sound_path, 'move.wav')),
+                'drop': pygame.mixer.Sound(os.path.join(sound_path, 'drop.wav')),
+                'line_clear': pygame.mixer.Sound(os.path.join(sound_path, 'line_clear.wav')),
+                'game_over': pygame.mixer.Sound(os.path.join(sound_path, 'game_over.wav')),
+                'background': pygame.mixer.Sound(os.path.join(sound_path, 'background.wav'))
+            }
+            self.sounds['rotate'].set_volume(1.0)
+            self.sounds['move'].set_volume(1.0)
+            self.sounds['drop'].set_volume(1.0)
+            self.sounds['line_clear'].set_volume(1.0)
+            self.sounds['game_over'].set_volume(1.0)
+            self.sounds['background'].set_volume(0.5)
+        except Exception as e:
+            print(f"Ошибка загрузки звуков: {e}")
+            self.sounds = {
+                'rotate': None,
+                'move': None,
+                'drop': None,
+                'line_clear': None,
+                'game_over': None,
+                'background': None
+            }
+        self.background_playing = False
+
+    def play(self, sound_name, loops=0):
+        if sound_name in self.sounds and self.sounds[sound_name]:
+            try:
+                self.sounds[sound_name].play(loops=loops)
+            except Exception as e:
+                print(f"Ошибка воспроизведения звука {sound_name}: {e}")
+
+    def stop(self, sound_name):
+        if sound_name in self.sounds and self.sounds[sound_name]:
+            try:
+                self.sounds[sound_name].stop()
+            except Exception as e:
+                print(f"Ошибка остановки звука {sound_name}: {e}")
+
+    def play_background(self):
+        if not self.background_playing and self.sounds.get('background'):
+            try:
+                self.sounds['background'].play(loops=-1)
+                self.background_playing = True
+            except Exception as e:
+                print(f"Ошибка воспроизведения фоновой музыки: {e}")
+
+    def stop_background(self):
+        if self.background_playing and self.sounds.get('background'):
+            try:
+                self.sounds['background'].stop()
+                self.background_playing = False
+            except Exception as e:
+                print(f"Ошибка остановки фоновой музыки: {e}")
+
 class TetrisGame:
     def __init__(self):
         self.screen = pygame.display.set_mode((WIDTH + 100, HEIGHT))
@@ -254,6 +277,8 @@ class TetrisGame:
         self.state = None
         self.mode = "menu"
         self.fps = 60
+        self.sound_manager = SoundManager()
+        self.sound_manager.play_background()
 
     def draw_next_tetromino(self):
         pygame.draw.rect(self.screen, DARK_BLUE, (PREVIEW_X - 5, PREVIEW_Y - 5, PREVIEW_WIDTH + 10, PREVIEW_HEIGHT + 10))
@@ -302,103 +327,132 @@ class TetrisGame:
                                      ((self.state.current_tetromino.x + x) * GRID_SIZE,
                                       (self.state.current_tetromino.y + y) * GRID_SIZE,
                                       GRID_SIZE - 1, GRID_SIZE - 1), 1)
+
         text_x = WIDTH + 10
-        pygame.draw.rect(self.screen, TEXT_BG, (text_x - 5, 10, 85, 90))
-        score_text = self.font.render(f"Счёт: {self.state.score}", True, WHITE)
-        high_score_text = self.font.render(f"Рекорд: {HIGH_SCORES[self.state.difficulty]}", True, WHITE)
-        level_text = self.font.render(f"Ур.: {self.state.level}", True, WHITE)
-        score_shadow = self.font.render(f"Счёт: {self.state.score}", True, TEXT_SHADOW)
-        high_score_shadow = self.font.render(f"Рекорд: {HIGH_SCORES[self.state.difficulty]}", True, TEXT_SHADOW)
-        level_shadow = self.font.render(f"Ур.: {self.state.level}", True, TEXT_SHADOW)
+        pygame.draw.rect(self.screen, TEXT_BG, (text_x - 10, 5, 95, 120))
+        score_text = self.font.render("Счёт:", True, WHITE)
+        score_value = self.font.render(f"{self.state.score}", True, WHITE)
+        high_score_text = self.font.render("Рекорд:", True, WHITE)
+        high_score_value = self.font.render(f"{HIGH_SCORES[self.state.difficulty]}", True, WHITE)
+        level_text = self.font.render("Уровень:", True, WHITE)
+        level_value = self.font.render(f"{self.state.level}", True, WHITE)
+        score_shadow = self.font.render("Счёт:", True, TEXT_SHADOW)
+        score_value_shadow = self.font.render(f"{self.state.score}", True, TEXT_SHADOW)
+        high_score_shadow = self.font.render("Рекорд:", True, TEXT_SHADOW)
+        high_score_value_shadow = self.font.render(f"{HIGH_SCORES[self.state.difficulty]}", True, TEXT_SHADOW)
+        level_shadow = self.font.render("Уровень:", True, TEXT_SHADOW)
+        level_value_shadow = self.font.render(f"{self.state.level}", True, TEXT_SHADOW)
+
         self.screen.blit(score_shadow, (text_x + 2, 12))
-        self.screen.blit(high_score_shadow, (text_x + 2, 37))
-        self.screen.blit(level_shadow, (text_x + 2, 62))
         self.screen.blit(score_text, (text_x, 10))
-        self.screen.blit(high_score_text, (text_x, 35))
-        self.screen.blit(level_text, (text_x, 60))
+        self.screen.blit(score_value_shadow, (text_x + 2, 32))
+        self.screen.blit(score_value, (text_x, 30))
+        self.screen.blit(high_score_shadow, (text_x + 2, 52))
+        self.screen.blit(high_score_text, (text_x, 50))
+        self.screen.blit(high_score_value_shadow, (text_x + 2, 72))
+        self.screen.blit(high_score_value, (text_x, 70))
+        self.screen.blit(level_shadow, (text_x + 2, 92))
+        self.screen.blit(level_text, (text_x, 90))
+        self.screen.blit(level_value_shadow, (text_x + 2, 112))
+        self.screen.blit(level_value, (text_x, 110))
+
         if self.state.paused:
             pause_text = self.font.render("Пауза (P)", True, YELLOW)
             pause_shadow = self.font.render("Пауза (P)", True, TEXT_SHADOW)
-            pygame.draw.rect(self.screen, TEXT_BG, (WIDTH // 2 - pause_text.get_width() // 2 - 5, HEIGHT // 2 - 15, pause_text.get_width() + 10, 30))
+            pygame.draw.rect(self.screen, TEXT_BG, (
+                WIDTH // 2 - pause_text.get_width() // 2 - 5, HEIGHT // 2 - 15, pause_text.get_width() + 10, 30))
             self.screen.blit(pause_shadow, (WIDTH // 2 - pause_text.get_width() // 2 + 2, HEIGHT // 2 + 2))
             self.screen.blit(pause_text, (WIDTH // 2 - pause_text.get_width() // 2, HEIGHT // 2))
         elif self.state.game_over:
             game_over_text = self.font.render("Игра окончена! (R)", True, RED)
             game_over_shadow = self.font.render("Игра окончена! (R)", True, TEXT_SHADOW)
-            pygame.draw.rect(self.screen, TEXT_BG, (WIDTH // 2 - game_over_text.get_width() // 2 - 5, HEIGHT // 2 - 15, game_over_text.get_width() + 10, 30))
+            pygame.draw.rect(self.screen, TEXT_BG, (
+                WIDTH // 2 - game_over_text.get_width() // 2 - 5, HEIGHT // 2 - 15, game_over_text.get_width() + 10, 30))
             self.screen.blit(game_over_shadow, (WIDTH // 2 - game_over_text.get_width() // 2 + 2, HEIGHT // 2 + 2))
             self.screen.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2))
+
         pause_hint = self.font.render("P - пауза", True, WHITE)
         exit_hint = self.font.render("Q - выход", True, WHITE)
         pause_shadow = self.font.render("P - пауза", True, TEXT_SHADOW)
         exit_shadow = self.font.render("Q - выход", True, TEXT_SHADOW)
         hint_x = WIDTH + 10
-        pygame.draw.rect(self.screen, TEXT_BG, (hint_x - 5, HEIGHT - 65, 85, 60))
+        pygame.draw.rect(self.screen, TEXT_BG, (hint_x - 10, HEIGHT - 70, 95, 65))
         self.screen.blit(pause_shadow, (hint_x + 2, HEIGHT - 62))
         self.screen.blit(exit_shadow, (hint_x + 2, HEIGHT - 37))
         self.screen.blit(pause_hint, (hint_x, HEIGHT - 60))
         self.screen.blit(exit_hint, (hint_x, HEIGHT - 35))
+
         self.draw_next_tetromino()
 
-    async def main(self):
-        running = True
-        while running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    save_high_scores_to_file()
-                    running = False
-                elif self.mode == "menu":
-                    selected_difficulty = self.menu.handle_input(event)
-                    if selected_difficulty:
-                        self.state = GameState(selected_difficulty)
-                        self.mode = "game"
-                elif self.mode == "game":
-                    if event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_p:
-                            self.state.paused = not self.state.paused
-                        elif event.key == pygame.K_q:
-                            save_high_scores_to_file()
-                            running = False
-                        elif not self.state.paused and not self.state.game_over:
-                            if event.key == pygame.K_LEFT and not self.state.check_collision(dx=-1):
-                                self.state.current_tetromino.move(-1, 0)
-                            elif event.key == pygame.K_RIGHT and not self.state.check_collision(dx=1):
-                                self.state.current_tetromino.move(1, 0)
-                            elif event.key == pygame.K_DOWN and not self.state.check_collision(dy=1):
-                                self.state.current_tetromino.move(0, 1)
-                            elif event.key == pygame.K_UP:
-                                original_shape = self.state.current_tetromino.shape
-                                self.state.current_tetromino.rotate()
-                                if self.state.check_collision():
-                                    self.state.current_tetromino.shape = original_shape
-                            elif event.key == pygame.K_SPACE:
-                                while not self.state.check_collision(dy=1):
-                                    self.state.current_tetromino.move(0, 1)
-                                self.state.merge()
-                                self.state.clear_lines()
-                                self.state.current_tetromino = self.state.next_tetromino
-                                self.state.next_tetromino = Tetromino()
-                                if self.state.check_collision():
-                                    self.state.game_over = True
-                        elif self.state.game_over and event.key == pygame.K_r:
-                            self.mode = "menu"
-
-            if self.mode == "menu":
-                self.menu.draw(self.screen)
-            elif self.mode == "game" and self.state:
-                self.state.update()
-                self.draw_game()
-
-            pygame.display.flip()
-            self.clock.tick(self.fps)
-            await asyncio.sleep(1.0 / self.fps)
-
-        pygame.quit()
-
-if platform.system() == "Emscripten":
+async def main():
     game = TetrisGame()
-    asyncio.ensure_future(game.main())
-else:
-    if __name__ == "__main__":
-        game = TetrisGame()
-        asyncio.run(game.main())
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                game.sound_manager.stop_background()
+                pygame.quit()
+                return
+            elif game.mode == "menu":
+                if selected_difficulty := game.menu.handle_input(event):
+                    game.state = GameState(selected_difficulty)
+                    game.mode = "game"
+                    game.sound_manager.play_background()
+            elif game.mode == "game":
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_p:
+                        game.state.paused = not game.state.paused
+                        if game.state.paused:
+                            game.sound_manager.stop_background()
+                        else:
+                            game.sound_manager.play_background()
+                    elif event.key == pygame.K_q:
+                        game.sound_manager.stop_background()
+                        pygame.quit()
+                        return
+                    elif not game.state.paused and not game.state.game_over:
+                        if event.key == pygame.K_LEFT and not game.state.check_collision(dx=-1):
+                            game.state.current_tetromino.move(-1, 0)
+                            game.sound_manager.play('move')
+                        elif event.key == pygame.K_RIGHT and not game.state.check_collision(dx=1):
+                            game.state.current_tetromino.move(1, 0)
+                            game.sound_manager.play('move')
+                        elif event.key == pygame.K_DOWN and not game.state.check_collision(dy=1):
+                            game.state.current_tetromino.move(0, 1)
+                            game.sound_manager.play('move')
+                        elif event.key == pygame.K_UP:
+                            original_shape = game.state.current_tetromino.shape
+                            game.state.current_tetromino.rotate()
+                            if game.state.check_collision():
+                                game.state.current_tetromino.shape = original_shape
+                            else:
+                                game.sound_manager.play('rotate')
+                        elif event.key == pygame.K_SPACE:
+                            while not game.state.check_collision(dy=1):
+                                game.state.current_tetromino.move(0, 1)
+                            game.sound_manager.play('drop')
+                            game.state.merge()
+                            if game.state.clear_lines() > 0:
+                                game.sound_manager.play('line_clear')
+                            game.state.current_tetromino = game.state.next_tetromino
+                            game.state.next_tetromino = Tetromino()
+                            if game.state.check_collision():
+                                game.state.game_over = True
+                                game.sound_manager.play('game_over')
+                    elif game.state.game_over and event.key == pygame.K_r:
+                        game.mode = "menu"
+                        game.sound_manager.play_background()
+
+        if game.mode == "menu":
+            game.menu.draw(game.screen)
+        elif game.mode == "game" and game.state:
+            cleared_lines = game.state.update()
+            if cleared_lines > 0:
+                game.sound_manager.play('line_clear')
+            game.draw_game()
+
+        pygame.display.flip()
+        game.clock.tick(game.fps)
+        await asyncio.sleep(1.0 / game.fps)
+
+if __name__ == "__main__":
+    asyncio.run(main())
