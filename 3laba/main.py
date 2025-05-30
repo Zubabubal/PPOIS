@@ -13,6 +13,11 @@ WIDTH, HEIGHT = 300, 600
 GRID_SIZE = 30
 GRID_WIDTH = WIDTH // GRID_SIZE
 GRID_HEIGHT = HEIGHT // GRID_SIZE
+PREVIEW_SIZE = 15  # ### Увеличено для предпросмотра: с 12 до 15
+PREVIEW_X = WIDTH + 20
+PREVIEW_Y = 150  # ### Увеличено для предпросмотра: смещено вниз
+PREVIEW_WIDTH = 2 * PREVIEW_SIZE  # ### Увеличено для предпросмотра: 30 пикселей
+PREVIEW_HEIGHT = 2 * PREVIEW_SIZE
 
 # Цвета
 BLACK = (0, 0, 0)
@@ -24,6 +29,10 @@ RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 ORANGE = (255, 165, 0)
+DARK_BLUE = (20, 20, 50)
+LIGHT_GRAY = (100, 100, 100)
+TEXT_BG = (40, 40, 40)
+TEXT_SHADOW = (20, 20, 20)
 
 # Формы тетромино
 SHAPES = [
@@ -59,7 +68,6 @@ def import_high_scores(json_str):
     global HIGH_SCORES
     try:
         loaded_scores = json.loads(json_str)
-        # Проверка, что все ожидаемые ключи присутствуют
         expected_keys = set(DIFFICULTY_LEVELS.keys())
         if not isinstance(loaded_scores, dict) or not expected_keys.issubset(loaded_scores.keys()):
             print(f"Ошибка: HIGH_SCORES_JSON не содержит ожидаемые ключи {expected_keys}")
@@ -100,7 +108,7 @@ def load_high_scores_from_file():
             print(f"Ошибка при загрузке рекордов из файла: {e}")
 
 # Загрузка рекордов при старте
-HIGH_SCORES_JSON = '{"Лёгкий": 200, "Средний": 400, "Сложный": 600}'  # Замените на свои рекорды
+HIGH_SCORES_JSON = '{"Лёгкий": 200, "Средний": 400, "Сложный": 600}'
 if platform.system() == "Emscripten":
     import_high_scores(HIGH_SCORES_JSON)
 else:
@@ -124,6 +132,7 @@ class GameState:
     def __init__(self, difficulty="Средний"):
         self.grid = [[BLACK for _ in range(GRID_WIDTH)] for _ in range(GRID_HEIGHT)]
         self.current_tetromino = Tetromino()
+        self.next_tetromino = Tetromino()
         self.game_over = False
         self.score = 0
         self.difficulty = difficulty
@@ -140,7 +149,7 @@ class GameState:
                     new_y = self.current_tetromino.y + y + dy
                     if new_x < 0 or new_x >= GRID_WIDTH or new_y >= GRID_HEIGHT:
                         return True
-                    if new_y >= 0 and self.grid[new_y][new_x] != BLACK:
+                    if self.grid[new_y][new_x] != BLACK:
                         return True
         return False
 
@@ -168,7 +177,8 @@ class GameState:
             else:
                 self.merge()
                 self.clear_lines()
-                self.current_tetromino = Tetromino()
+                self.current_tetromino = self.next_tetromino
+                self.next_tetromino = Tetromino()
                 if self.check_collision():
                     self.game_over = True
                     global HIGH_SCORES
@@ -176,31 +186,47 @@ class GameState:
 
 class Menu:
     def __init__(self):
-        self.font = pygame.font.SysFont("arial", 36)
-        self.hint_font = pygame.font.SysFont("arial", 24)
+        self.font = pygame.font.SysFont("verdana", 32, bold=True)
+        self.hint_font = pygame.font.SysFont("verdana", 16)
         self.options = list(DIFFICULTY_LEVELS.keys())
         self.selected = 0
         self.mode = "main"
 
     def draw(self, screen):
         screen.fill(BLACK)
+        total_height = 32 + 40 * len(self.options) + 20
+        start_y = (HEIGHT - total_height) // 2 - 50
         if self.mode == "main":
             title = self.font.render("Тетрис", True, WHITE)
-            screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 100))
+            title_shadow = self.font.render("Тетрис", True, TEXT_SHADOW)
+            title_x = (WIDTH + 100) // 2 - title.get_width() // 2
+            screen.blit(title_shadow, (title_x + 2, start_y + 2))
+            screen.blit(title, (title_x, start_y))
             for i, option in enumerate(self.options):
                 color = YELLOW if i == self.selected else WHITE
                 text = self.font.render(option, True, color)
-                screen.blit(text, (WIDTH // 2 - text.get_width() // 2, 200 + i * 50))
+                text_shadow = self.font.render(option, True, TEXT_SHADOW)
+                text_x = (WIDTH + 100) // 2 - text.get_width() // 2
+                screen.blit(text_shadow, (text_x + 2, start_y + 50 + i * 40 + 2))
+                screen.blit(text, (text_x, start_y + 50 + i * 40))
             hint = self.hint_font.render("Нажмите H для рекордов", True, WHITE)
-            screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 50))
+            hint_x = (WIDTH + 100) // 2 - hint.get_width() // 2
+            screen.blit(hint, (hint_x, start_y + 50 + len(self.options) * 40 + 20))
         elif self.mode == "high_scores":
             title = self.font.render("Рекорды", True, WHITE)
-            screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 100))
+            title_shadow = self.font.render("Рекорды", True, TEXT_SHADOW)
+            title_x = (WIDTH + 100) // 2 - title.get_width() // 2
+            screen.blit(title_shadow, (title_x + 2, start_y + 2))
+            screen.blit(title, (title_x, start_y))
             for i, (difficulty, score) in enumerate(HIGH_SCORES.items()):
                 text = self.font.render(f"{difficulty}: {score}", True, WHITE)
-                screen.blit(text, (WIDTH // 2 - text.get_width() // 2, 200 + i * 50))
+                text_shadow = self.font.render(f"{difficulty}: {score}", True, TEXT_SHADOW)
+                text_x = (WIDTH + 100) // 2 - text.get_width() // 2
+                screen.blit(text_shadow, (text_x + 2, start_y + 50 + i * 40 + 2))
+                screen.blit(text, (text_x, start_y + 50 + i * 40))
             hint = self.hint_font.render("Нажмите M для меню", True, WHITE)
-            screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 50))
+            hint_x = (WIDTH + 100) // 2 - hint.get_width() // 2
+            screen.blit(hint, (hint_x, start_y + 50 + len(self.options) * 40 + 20))
 
     def handle_input(self, event):
         if event.type == pygame.KEYDOWN:
@@ -220,21 +246,51 @@ class Menu:
 
 class TetrisGame:
     def __init__(self):
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.screen = pygame.display.set_mode((WIDTH + 100, HEIGHT))
         pygame.display.set_caption("Тетрис")
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("arial", 24)
+        self.font = pygame.font.SysFont("verdana", 16, bold=True)
         self.menu = Menu()
         self.state = None
         self.mode = "menu"
         self.fps = 60
 
+    def draw_next_tetromino(self):
+        pygame.draw.rect(self.screen, DARK_BLUE, (PREVIEW_X - 5, PREVIEW_Y - 5, PREVIEW_WIDTH + 10, PREVIEW_HEIGHT + 10))
+        pygame.draw.rect(self.screen, WHITE, (PREVIEW_X - 5, PREVIEW_Y - 5, PREVIEW_WIDTH + 10, PREVIEW_HEIGHT + 10), 2)
+        next_text = self.font.render("След.:", True, WHITE)
+        next_shadow = self.font.render("След.:", True, TEXT_SHADOW)
+        self.screen.blit(next_shadow, (PREVIEW_X, PREVIEW_Y - 20 + 2))
+        self.screen.blit(next_text, (PREVIEW_X, PREVIEW_Y - 20))
+        shape_width = len(self.state.next_tetromino.shape[0])
+        shape_height = len(self.state.next_tetromino.shape)
+        offset_x = (2 - shape_width) // 2 * PREVIEW_SIZE
+        offset_y = (2 - shape_height) // 2 * PREVIEW_SIZE
+        for y, row in enumerate(self.state.next_tetromino.shape):
+            for x, cell in enumerate(row):
+                if cell:
+                    pygame.draw.rect(
+                        self.screen,
+                        self.state.next_tetromino.color,
+                        (PREVIEW_X + x * PREVIEW_SIZE + offset_x, PREVIEW_Y + y * PREVIEW_SIZE + offset_y, PREVIEW_SIZE - 1, PREVIEW_SIZE - 1)
+                    )
+                    pygame.draw.rect(
+                        self.screen,
+                        BLACK,
+                        (PREVIEW_X + x * PREVIEW_SIZE + offset_x, PREVIEW_Y + y * PREVIEW_SIZE + offset_y, PREVIEW_SIZE - 1, PREVIEW_SIZE - 1),
+                        1
+                    )
+
     def draw_game(self):
         self.screen.fill(BLACK)
+        pygame.draw.rect(self.screen, LIGHT_GRAY, (0, 0, WIDTH, HEIGHT), 3)
         for y in range(GRID_HEIGHT):
             for x in range(GRID_WIDTH):
                 pygame.draw.rect(self.screen, self.state.grid[y][x],
                                  (x * GRID_SIZE, y * GRID_SIZE, GRID_SIZE - 1, GRID_SIZE - 1))
+                if self.state.grid[y][x] != BLACK:
+                    pygame.draw.rect(self.screen, BLACK,
+                                     (x * GRID_SIZE, y * GRID_SIZE, GRID_SIZE - 1, GRID_SIZE - 1), 1)
         for y, row in enumerate(self.state.current_tetromino.shape):
             for x, cell in enumerate(row):
                 if cell:
@@ -242,20 +298,47 @@ class TetrisGame:
                                      ((self.state.current_tetromino.x + x) * GRID_SIZE,
                                       (self.state.current_tetromino.y + y) * GRID_SIZE,
                                       GRID_SIZE - 1, GRID_SIZE - 1))
+                    pygame.draw.rect(self.screen, BLACK,
+                                     ((self.state.current_tetromino.x + x) * GRID_SIZE,
+                                      (self.state.current_tetromino.y + y) * GRID_SIZE,
+                                      GRID_SIZE - 1, GRID_SIZE - 1), 1)
+        text_x = WIDTH + 10
+        pygame.draw.rect(self.screen, TEXT_BG, (text_x - 5, 10, 85, 90))
         score_text = self.font.render(f"Счёт: {self.state.score}", True, WHITE)
         high_score_text = self.font.render(f"Рекорд: {HIGH_SCORES[self.state.difficulty]}", True, WHITE)
-        level_text = self.font.render(f"Уровень: {self.state.level}", True, WHITE)
-        self.screen.blit(score_text, (10, 10))
-        self.screen.blit(high_score_text, (10, 40))
-        self.screen.blit(level_text, (10, 70))
+        level_text = self.font.render(f"Ур.: {self.state.level}", True, WHITE)
+        score_shadow = self.font.render(f"Счёт: {self.state.score}", True, TEXT_SHADOW)
+        high_score_shadow = self.font.render(f"Рекорд: {HIGH_SCORES[self.state.difficulty]}", True, TEXT_SHADOW)
+        level_shadow = self.font.render(f"Ур.: {self.state.level}", True, TEXT_SHADOW)
+        self.screen.blit(score_shadow, (text_x + 2, 12))
+        self.screen.blit(high_score_shadow, (text_x + 2, 37))
+        self.screen.blit(level_shadow, (text_x + 2, 62))
+        self.screen.blit(score_text, (text_x, 10))
+        self.screen.blit(high_score_text, (text_x, 35))
+        self.screen.blit(level_text, (text_x, 60))
         if self.state.paused:
             pause_text = self.font.render("Пауза (P)", True, YELLOW)
+            pause_shadow = self.font.render("Пауза (P)", True, TEXT_SHADOW)
+            pygame.draw.rect(self.screen, TEXT_BG, (WIDTH // 2 - pause_text.get_width() // 2 - 5, HEIGHT // 2 - 15, pause_text.get_width() + 10, 30))
+            self.screen.blit(pause_shadow, (WIDTH // 2 - pause_text.get_width() // 2 + 2, HEIGHT // 2 + 2))
             self.screen.blit(pause_text, (WIDTH // 2 - pause_text.get_width() // 2, HEIGHT // 2))
         elif self.state.game_over:
-            game_over_text = self.font.render("Игра окончена! Нажмите R", True, RED)
+            game_over_text = self.font.render("Игра окончена! (R)", True, RED)
+            game_over_shadow = self.font.render("Игра окончена! (R)", True, TEXT_SHADOW)
+            pygame.draw.rect(self.screen, TEXT_BG, (WIDTH // 2 - game_over_text.get_width() // 2 - 5, HEIGHT // 2 - 15, game_over_text.get_width() + 10, 30))
+            self.screen.blit(game_over_shadow, (WIDTH // 2 - game_over_text.get_width() // 2 + 2, HEIGHT // 2 + 2))
             self.screen.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2))
-        hint_text = self.font.render("Q для выхода", True, WHITE)
-        self.screen.blit(hint_text, (10, HEIGHT - 30))
+        pause_hint = self.font.render("P - пауза", True, WHITE)
+        exit_hint = self.font.render("Q - выход", True, WHITE)
+        pause_shadow = self.font.render("P - пауза", True, TEXT_SHADOW)
+        exit_shadow = self.font.render("Q - выход", True, TEXT_SHADOW)
+        hint_x = WIDTH + 10
+        pygame.draw.rect(self.screen, TEXT_BG, (hint_x - 5, HEIGHT - 65, 85, 60))
+        self.screen.blit(pause_shadow, (hint_x + 2, HEIGHT - 62))
+        self.screen.blit(exit_shadow, (hint_x + 2, HEIGHT - 37))
+        self.screen.blit(pause_hint, (hint_x, HEIGHT - 60))
+        self.screen.blit(exit_hint, (hint_x, HEIGHT - 35))
+        self.draw_next_tetromino()
 
     async def main(self):
         running = True
@@ -293,7 +376,8 @@ class TetrisGame:
                                     self.state.current_tetromino.move(0, 1)
                                 self.state.merge()
                                 self.state.clear_lines()
-                                self.state.current_tetromino = Tetromino()
+                                self.state.current_tetromino = self.state.next_tetromino
+                                self.state.next_tetromino = Tetromino()
                                 if self.state.check_collision():
                                     self.state.game_over = True
                         elif self.state.game_over and event.key == pygame.K_r:
