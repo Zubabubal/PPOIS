@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bank ATM - Insert Card</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+    <div class="bg-white p-6 rounded shadow-md w-full max-w-md">
+        <h1 class="text-2xl font-bold mb-4 text-center">Insert Card</h1>
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="bg-red-100 text-red-700 p-2 rounded mb-4">
+                    {% for message in messages %}
+                        <p>{{ message }}</p>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+        <form method="POST" action="{{ url_for('load_card') }}">
+            <div class="mb-4">
+                <label class="block text-gray-700">Enter your card (1 to 5):</label>
+                <input type="text" name="card_number" class="w-full p-2 border rounded" required>
+            </div>
+            <button type="submit" class="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Insert Card</button>
+        </form>
+    </div>
+</body>
+</html>
